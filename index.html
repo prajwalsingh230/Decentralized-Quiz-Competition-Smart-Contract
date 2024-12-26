@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Decentralized Quiz Competition</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.6.1/web3.min.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+      .question {
+        margin: 20px 0;
+      }
+      .answer {
+        margin-top: 10px;
+      }
+      button {
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Decentralized Quiz Competition</h1>
+
+    <div id="questions-container"></div>
+
+    <div>
+      <h2>Your Participation</h2>
+      <input type="text" id="answer-input" placeholder="Your Answer" />
+      <button onclick="submitAnswer()">Submit Answer</button>
+    </div>
+
+    <div>
+      <h2>Admin Section</h2>
+      <h3>Add New Question</h3>
+      <input type="text" id="question-input" placeholder="Question Text" />
+      <input type="text" id="answer-input-admin" placeholder="Correct Answer" />
+      <button onclick="addQuestion()">Add Question</button>
+    </div>
+
+    <div>
+      <h2>Reward Winners</h2>
+      <input type="number" id="reward-amount" placeholder="Reward per winner" />
+      <button onclick="awardWinners()">Reward Winners</button>
+    </div>
+
+    <script>
+      // Web3 instance
+      const web3 = new Web3(window.ethereum);
+
+      // Connect to the Ethereum wallet (MetaMask)
+      window.ethereum
+        .enable()
+        .then(() => {
+          console.log("Connected to MetaMask");
+        })
+        .catch((err) => {
+          console.log("Error connecting to MetaMask:", err);
+        });
+
+      // Contract ABI and address (replace with your contract's actual ABI and address)
+      const contractAddress = "0xa5CC5F07e20f38514f91B3D9acaA8966B0110150";
+      const contractABI = [
+        {
+          inputs: [
+            {
+              internalType: "address",
+              name: "tokenAddress",
+              type: "address",
+            },
+          ],
+          stateMutability: "nonpayable",
+          type: "constructor",
+        },
+        {
+          anonymous: false,
+          inputs: [
+            {
+              indexed: true,
+              internalType: "address",
+              name: "participant",
+              type: "address",
+            },
+            {
+              indexed: true,
+              internalType: "uint256",
+              name: "questionIndex",
+              type: "uint256",
+            },
+            {
+              indexed: false,
+              internalType: "bool",
+              name: "isCorrect",
+              type: "bool",
+            },
+          ],
+          name: "AnswerSubmitted",
+          type: "event",
+        },
+        {
+          anonymous: false,
+          inputs: [
+            {
+              indexed: true,
+              internalType: "address",
+              name: "winner",
+              type: "address",
+            },
+            {
+              indexed: false,
+              internalType: "uint256",
+              name: "rewardAmount",
+              type: "uint256",
+            },
+          ],
+          name: "WinnersRewarded",
+          type: "event",
+        },
+        {
+          inputs: [
+            {
+              internalType: "string",
+              name: "questionText",
+              type: "string",
+            },
+            {
+              internalType: "string",
+              name: "correctAnswer",
+              type: "string",
+            },
+          ],
+          name: "addQuestion",
+          outputs: [],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+        {
+          inputs: [
+            {
+              internalType: "uint256",
+              name: "rewardAmountPerWinner",
+              type: "uint256",
+            },
+          ],
+          name: "awardWinners",
+          outputs: [],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+        {
+          inputs: [],
+          name: "organizer",
+          outputs: [
+            {
+              internalType: "address",
+              name: "",
+              type: "address",
+            },
+          ],
+          stateMutability: "view",
+          type: "function",
+        },
+        {
+          inputs: [
+            {
+              internalType: "address",
+              name: "",
+              type: "address",
+            },
+            {
+              internalType: "uint256",
+              name: "",
+              type: "uint256",
+            },
+          ],
+          name: "participants",
+          outputs: [
+            {
+              internalType: "bool",
+              name: "hasParticipated",
+              type: "bool",
+            },
+            {
+              internalType: "bool",
+              name: "isCorrect",
+              type: "bool",
+            },
+          ],
+          stateMutability: "view",
+          type: "function",
+        },
+        {
+          inputs: [
+            {
+              internalType: "uint256",
+              name: "",
+              type: "uint256",
+            },
+          ],
+          name: "questions",
+          outputs: [
+            {
+              internalType: "string",
+              name: "questionText",
+              type: "string",
+            },
+            {
+              internalType: "string",
+              name: "correctAnswer",
+              type: "string",
+            },
+          ],
+          stateMutability: "view",
+          type: "function",
+        },
+        {
+          inputs: [],
+          name: "rewardToken",
+          outputs: [
+            {
+              internalType: "contract IToken",
+              name: "",
+              type: "address",
+            },
+          ],
+          stateMutability: "view",
+          type: "function",
+        },
+        {
+          inputs: [
+            {
+              internalType: "uint256",
+              name: "questionIndex",
+              type: "uint256",
+            },
+            {
+              internalType: "string",
+              name: "answer",
+              type: "string",
+            },
+          ],
+          name: "submitAnswer",
+          outputs: [],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+      ];
+
+      const contract = new web3.eth.Contract(contractABI, contractAddress);
+
+      // Function to display questions
+      async function displayQuestions() {
+        const questionsContainer = document.getElementById(
+          "questions-container"
+        );
+        questionsContainer.innerHTML = "";
+
+        // Fetch questions from the contract
+        const questionCount = await contract.methods.questions.length().call();
+        for (let i = 0; i < questionCount; i++) {
+          const question = await contract.methods.questions(i).call();
+          const questionElement = document.createElement("div");
+          questionElement.classList.add("question");
+
+          const questionText = document.createElement("p");
+          questionText.textContent = `Q${i + 1}: ${question.questionText}`;
+          questionElement.appendChild(questionText);
+
+          const answerButton = document.createElement("button");
+          answerButton.textContent = "Submit Answer";
+          answerButton.onclick = function () {
+            submitAnswer(i, question.correctAnswer);
+          };
+          questionElement.appendChild(answerButton);
+
+          questionsContainer.appendChild(questionElement);
+        }
+      }
+
+      // Function to submit an answer
+      async function submitAnswer(questionIndex, correctAnswer) {
+        const userAnswer = document.getElementById("answer-input").value;
+        if (!userAnswer) {
+          alert("Please enter an answer!");
+          return;
+        }
+
+        const accounts = await web3.eth.getAccounts();
+        const account = accounts[0];
+
+        const isCorrect = userAnswer === correctAnswer;
+
+        // Submit the answer to the smart contract
+        await contract.methods
+          .submitAnswer(questionIndex, userAnswer)
+          .send({ from: account });
+
+        alert(isCorrect ? "Correct Answer!" : "Wrong Answer!");
+
+        // Log the answer submission in the UI
+        const answerSubmittedEvent = new CustomEvent("answerSubmitted", {
+          detail: { questionIndex, isCorrect },
+        });
+        document.dispatchEvent(answerSubmittedEvent);
+      }
+
+      // Function to add a new question (Admin only)
+      async function addQuestion() {
+        const questionText = document.getElementById("question-input").value;
+        const correctAnswer =
+          document.getElementById("answer-input-admin").value;
+        if (!questionText || !correctAnswer) {
+          alert("Please fill in both question and answer!");
+          return;
+        }
+
+        const accounts = await web3.eth.getAccounts();
+        const account = accounts[0];
+
+        // Call the smart contract to add the new question
+        await contract.methods
+          .addQuestion(questionText, correctAnswer)
+          .send({ from: account });
+
+        alert("Question added successfully!");
+        displayQuestions();
+      }
+
+      // Function to reward winners
+      async function awardWinners() {
+        const rewardAmount = document.getElementById("reward-amount").value;
+        if (!rewardAmount) {
+          alert("Please enter a reward amount!");
+          return;
+        }
+
+        const accounts = await web3.eth.getAccounts();
+        const account = accounts[0];
+
+        // Call the smart contract to reward winners
+        await contract.methods
+          .awardWinners(rewardAmount)
+          .send({ from: account });
+
+        alert("Winners rewarded successfully!");
+      }
+
+      // Display questions when the page loads
+      displayQuestions();
+    </script>
+  </body>
+</html>
